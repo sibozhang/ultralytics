@@ -72,7 +72,7 @@ class AutoBackend(nn.Module):
             | TensorFlow Lite       | *.tflite         |
             | TensorFlow Edge TPU   | *_edgetpu.tflite |
             | PaddlePaddle          | *_paddle_model   |
-            | ncnn                  | *_ncnn_model     |
+            | NCNN                  | *_ncnn_model     |
 
     This class offers dynamic backend switching capabilities based on the input model format, making it easier to deploy
     models across various platforms.
@@ -180,17 +180,17 @@ class AutoBackend(nn.Module):
             metadata = session.get_modelmeta().custom_metadata_map  # metadata
         elif xml:  # OpenVINO
             LOGGER.info(f"Loading {w} for OpenVINO inference...")
-            check_requirements("openvino>=2023.0")  # requires openvino-dev: https://pypi.org/project/openvino-dev/
-            from openvino.runtime import Core, Layout, get_batch  # noqa
+            check_requirements("openvino>=2023.3")  # requires openvino: https://pypi.org/project/openvino-dev/
+            import openvino as ov  # noqa
 
-            core = Core()
+            core = ov.Core()
             w = Path(w)
             if not w.is_file():  # if not *.xml
                 w = next(w.glob("*.xml"))  # get *.xml file from *_openvino_model dir
             ov_model = core.read_model(model=str(w), weights=w.with_suffix(".bin"))
             if ov_model.get_parameters()[0].get_layout().empty:
-                ov_model.get_parameters()[0].set_layout(Layout("NCHW"))
-            batch_dim = get_batch(ov_model)
+                ov_model.get_parameters()[0].set_layout(ov.Layout("NCHW"))
+            batch_dim = ov.get_batch(ov_model)
             if batch_dim.is_static:
                 batch_size = batch_dim.get_length()
             ov_compiled_model = core.compile_model(ov_model, device_name="AUTO")  # AUTO selects best available device
@@ -304,9 +304,9 @@ class AutoBackend(nn.Module):
             input_handle = predictor.get_input_handle(predictor.get_input_names()[0])
             output_names = predictor.get_output_names()
             metadata = w.parents[1] / "metadata.yaml"
-        elif ncnn:  # ncnn
-            LOGGER.info(f"Loading {w} for ncnn inference...")
-            check_requirements("git+https://github.com/Tencent/ncnn.git" if ARM64 else "ncnn")  # requires ncnn
+        elif ncnn:  # NCNN
+            LOGGER.info(f"Loading {w} for NCNN inference...")
+            check_requirements("git+https://github.com/Tencent/ncnn.git" if ARM64 else "ncnn")  # requires NCNN
             import ncnn as pyncnn
 
             net = pyncnn.Net()
@@ -431,7 +431,7 @@ class AutoBackend(nn.Module):
             self.input_handle.copy_from_cpu(im)
             self.predictor.run()
             y = [self.predictor.get_output_handle(x).copy_to_cpu() for x in self.output_names]
-        elif self.ncnn:  # ncnn
+        elif self.ncnn:  # NCNN
             mat_in = self.pyncnn.Mat(im[0].cpu().numpy())
             ex = self.net.create_extractor()
             input_names, output_names = self.net.input_names(), self.net.output_names()
@@ -543,6 +543,6 @@ class AutoBackend(nn.Module):
             from urllib.parse import urlsplit
 
             url = urlsplit(p)
-            triton = url.netloc and url.path and url.scheme in {"http", "grpc"}
+            triton = bool(url.netloc) and bool(url.path) and url.scheme in {"http", "grpc"}
 
         return types + [triton]
